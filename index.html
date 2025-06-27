@@ -191,6 +191,13 @@
             background: rgba(248, 113, 113, 0.1);
         }
 
+        .status.info {
+            border: 1px solid rgba(96, 165, 250, 0.3);
+            background: rgba(96, 165, 250, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+        
         .status.info::before {
             content: '';
             position: absolute;
@@ -241,21 +248,41 @@
             font-weight: 500;
         }
 
+        .download-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-direction: column;
+        }
+
         .download-link {
-            display: inline-block;
-            margin-top: 15px;
-            padding: 10px 20px;
-            background: rgba(120, 70, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #7846ff, #ff4670);
             color: #fff;
             text-decoration: none;
             border-radius: 8px;
-            font-size: 14px;
+            font-size: 15px;
+            font-weight: 500;
             transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            width: 100%;
         }
 
         .download-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(120, 70, 255, 0.3);
+        }
+
+        .download-link.secondary {
+            background: rgba(120, 70, 255, 0.2);
+        }
+
+        .download-link.secondary:hover {
             background: rgba(120, 70, 255, 0.3);
-            transform: translateY(-1px);
         }
 
         @media (max-width: 480px) {
@@ -294,7 +321,7 @@
         
         <div id="videoInfo" class="video-info">
             <div class="info-row">
-                <span class="info-label">Resolution:</span>
+                <span class="info-label">Quality:</span>
                 <span class="info-value" id="quality">-</span>
             </div>
             <div class="info-row">
@@ -302,10 +329,14 @@
                 <span class="info-value" id="size">-</span>
             </div>
             <div class="info-row">
-                <span class="info-label">Quality:</span>
-                <span class="info-value" id="format">-</span>
+                <span class="info-label">Bitrate:</span>
+                <span class="info-value" id="bitrate">-</span>
             </div>
-            <div id="downloadLinkContainer"></div>
+            <div class="info-row" id="durationRow" style="display: none;">
+                <span class="info-label">Duration:</span>
+                <span class="info-value" id="duration">-</span>
+            </div>
+            <div class="download-buttons" id="downloadButtons"></div>
         </div>
     </div>
 
@@ -327,7 +358,6 @@
                 urlInput.value = text;
                 if (isValidTikTokUrl(text)) {
                     urlInput.focus();
-                    // Visual feedback
                     pasteBtn.style.color = '#34d399';
                     setTimeout(() => {
                         pasteBtn.style.color = '';
@@ -352,19 +382,89 @@
         
         // Show video info
         function showVideoInfo(data) {
-            document.getElementById('quality').textContent = data.quality || '1080p';
-            document.getElementById('size').textContent = data.size || 'Unknown';
-            document.getElementById('format').textContent = `${data.codec?.toUpperCase() || 'H264'} • ${data.bitrate || 'Unknown'}`;
+            document.getElementById('quality').textContent = data.quality || 'Original';
+            document.getElementById('size').textContent = data.size || 'Processing...';
+            document.getElementById('bitrate').textContent = data.bitrate || 'High Quality';
             
-            // Add download link
-            const linkContainer = document.getElementById('downloadLinkContainer');
-            linkContainer.innerHTML = `
-                <a href="${data.downloadUrl}" class="download-link" download="${data.filename || 'tiktok_original.mp4'}">
-                    ↓ Download Original Quality
-                </a>
-            `;
+            // Show duration if available
+            if (data.duration) {
+                document.getElementById('duration').textContent = data.duration;
+                document.getElementById('durationRow').style.display = 'flex';
+            }
+            
+            // Create download buttons
+            const buttonsContainer = document.getElementById('downloadButtons');
+            buttonsContainer.innerHTML = '';
+            
+            // Main download button
+            const mainBtn = document.createElement('a');
+            mainBtn.href = data.downloadUrl;
+            mainBtn.className = 'download-link';
+            mainBtn.download = data.filename || 'tiktok_original.mp4';
+            mainBtn.innerHTML = '⬇ Download Video (Best Quality)';
+            mainBtn.onclick = (e) => {
+                e.preventDefault();
+                downloadFile(data.downloadUrl, data.filename || 'tiktok_original.mp4');
+            };
+            buttonsContainer.appendChild(mainBtn);
+            
+            // Audio download if available
+            if (data.musicUrl) {
+                const audioBtn = document.createElement('a');
+                audioBtn.href = data.musicUrl;
+                audioBtn.className = 'download-link secondary';
+                audioBtn.download = 'tiktok_audio.mp3';
+                audioBtn.innerHTML = '🎵 Download Audio Only';
+                audioBtn.onclick = (e) => {
+                    e.preventDefault();
+                    downloadFile(data.musicUrl, 'tiktok_audio.mp3');
+                };
+                buttonsContainer.appendChild(audioBtn);
+            }
             
             videoInfo.classList.add('show');
+        }
+        
+        // Better download function
+        async function downloadFile(url, filename) {
+            try {
+                showStatus('Starting download...', 'info');
+                
+                // Method 1: Try fetch + blob (works for CORS-enabled URLs)
+                try {
+                    const response = await fetch(url);
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                    
+                    showStatus('Download started! Check your downloads folder.', 'success');
+                    return;
+                } catch (e) {
+                    console.log('Blob download failed, trying direct download');
+                }
+                
+                // Method 2: Direct download (fallback)
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                showStatus('Download started! Check your downloads folder.', 'success');
+                
+            } catch (error) {
+                console.error('Download error:', error);
+                showStatus('Download failed. Try right-clicking the button and "Save as..."', 'error');
+            }
         }
         
         // Validate TikTok URL
@@ -374,7 +474,7 @@
                    url.includes('vt.tiktok.com');
         }
         
-        // Download video
+        // Main download function
         async function downloadVideo(url) {
             try {
                 const response = await fetch(API_ENDPOINT, {
@@ -385,41 +485,29 @@
                     body: JSON.stringify({ url })
                 });
                 
-                const data = await response.json();
-                
                 if (!response.ok) {
-                    throw new Error(data.error || 'Download failed');
+                    const error = await response.json();
+                    throw new Error(error.error || 'Download failed');
                 }
                 
+                const data = await response.json();
+                
                 if (data.success) {
-                    showStatus(`Original quality video ready! ${data.quality}${data.bitrate ? ' @ ' + data.bitrate : ''}`, 'success');
+                    showStatus('Video ready! Click the button below to download.', 'success');
                     showVideoInfo(data);
-                    
-                    // Auto-start download
-                    const a = document.createElement('a');
-                    a.href = data.downloadUrl;
-                    a.download = data.filename || `tiktok_original_${Date.now()}.mp4`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
                 } else {
                     throw new Error(data.error || 'Download failed');
                 }
                 
             } catch (error) {
-                console.error('Download error:', error);
-                if (error.message.includes('fetch')) {
-                    showStatus('Network error. Please check your connection.', 'error');
-                } else {
-                    showStatus(`Error: ${error.message}`, 'error');
-                }
+                console.error('Error:', error);
+                showStatus(`Error: ${error.message}`, 'error');
                 videoInfo.classList.remove('show');
             }
         }
         
         // Handle download button click
         async function handleDownload() {
-            // Prevent multiple simultaneous downloads
             if (downloadBtn.disabled) return;
             
             const url = urlInput.value.trim();
@@ -439,9 +527,9 @@
             downloadBtn.classList.add('loading');
             document.getElementById('btnText').textContent = 'Processing...';
             videoInfo.classList.remove('show');
-            status.classList.remove('show'); // Clear any previous status
+            status.classList.remove('show');
             
-            showStatus('Extracting original source file...', 'info');
+            showStatus('Finding highest quality source...', 'info');
             
             try {
                 await downloadVideo(url);
@@ -456,27 +544,6 @@
         urlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !downloadBtn.disabled) {
                 handleDownload();
-            }
-        });
-        
-        // Auto-paste on page load if clipboard has TikTok URL
-        window.addEventListener('load', async () => {
-            // Only auto-paste if input is empty
-            if (!urlInput.value) {
-                try {
-                    const text = await navigator.clipboard.readText();
-                    if (isValidTikTokUrl(text)) {
-                        urlInput.value = text;
-                        showStatus('TikTok URL detected in clipboard', 'info');
-                        setTimeout(() => {
-                            if (!status.classList.contains('error')) {
-                                status.classList.remove('show');
-                            }
-                        }, 3000);
-                    }
-                } catch (err) {
-                    // Ignore clipboard errors silently
-                }
             }
         });
         

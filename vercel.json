@@ -1,17 +1,13 @@
 {
-  "functions": {
-    "api/download.js": {
-      "maxDuration": 10
-    }
+  "name": "tiktok-downloader",
+  "version": "1.0.0",
+  "description": "TikTok video downloader - Original quality, no watermark",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
   },
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
-      ]
-    }
-  ]
+  "engines": {
+    "node": ">=16.0.0"
+  }
 }

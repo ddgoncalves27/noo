@@ -4,12 +4,10 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     
-    // Handle OPTIONS request
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
     
-    // Only accept POST requests
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -17,102 +15,106 @@ export default async function handler(req, res) {
     try {
         const { url } = req.body;
         
-        if (!url || (!url.includes('tiktok.com') && !url.includes('vm.tiktok.com') && !url.includes('vt.tiktok.com'))) {
+        if (!url || !isValidTikTokUrl(url)) {
             return res.status(400).json({ 
                 success: false, 
                 error: 'Invalid TikTok URL' 
             });
         }
         
-        // Get the original video
-        const videoData = await getOriginalVideo(url);
+        // Get the HIGHEST QUALITY video
+        const videoData = await extractBestQuality(url);
         
         return res.status(200).json({
             success: true,
-            downloadUrl: videoData.url,
-            quality: videoData.quality,
-            size: videoData.size,
-            bitrate: videoData.bitrate,
-            codec: videoData.codec,
-            filename: videoData.filename
+            ...videoData
         });
         
     } catch (error) {
-        console.error('Download error:', error);
+        console.error('Error:', error);
         return res.status(500).json({ 
             success: false, 
-            error: 'Failed to extract video. Please try again.' 
+            error: error.message || 'Failed to extract video' 
         });
     }
 }
 
-async function getOriginalVideo(url) {
-    const videoId = extractVideoId(url);
-    
-    // Try multiple extraction methods
-    
-    // Method 1: Direct API
+function isValidTikTokUrl(url) {
+    return url.includes('tiktok.com') || 
+           url.includes('vm.tiktok.com') || 
+           url.includes('vt.tiktok.com');
+}
+
+async function extractBestQuality(url) {
+    // Method 1: Try TikWM API (gets source quality)
     try {
-        const apiUrl = `https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id=${videoId}`;
-        const response = await fetch(apiUrl, {
-            headers: {
-                'User-Agent': 'com.zhiliaoapp.musically/2022600030 (Linux; U; Android 7.1.2; es_ES; SM-G988N; Build/NRD90M.G988NKSU1AQDC)'
-            }
-        });
+        const tikwmUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`;
+        const response = await fetch(tikwmUrl);
         
         if (response.ok) {
             const data = await response.json();
-            if (data.aweme_list && data.aweme_list[0]) {
-                const video = data.aweme_list[0].video;
-                const urls = video.play_addr.url_list;
-                const hdUrl = urls.find(u => !u.includes('watermark')) || urls[0];
+            if (data.code === 0 && data.data) {
+                const video = data.data;
+                
+                // Get highest quality URL (hdplay or play)
+                const hdUrl = video.hdplay || video.play;
+                const musicUrl = video.music || video.music_info?.play;
                 
                 return {
-                    url: hdUrl,
-                    quality: `${video.width}x${video.height}`,
-                    bitrate: `${(video.bit_rate / 1000000).toFixed(2)} Mbps`,
-                    size: calculateSize(video.bit_rate, video.duration / 1000),
+                    downloadUrl: hdUrl,
+                    quality: video.hdplay ? `${video.width}x${video.height} HD` : `${video.width}x${video.height}`,
+                    size: video.size ? `${(video.size / 1048576).toFixed(1)} MB` : 'Unknown',
+                    bitrate: video.bitrate ? `${(video.bitrate / 1000).toFixed(0)} kbps` : 'Original',
                     codec: 'h264',
-                    filename: `tiktok_${videoId}_${video.width}x${video.height}.mp4`
+                    duration: video.duration ? `${video.duration}s` : null,
+                    filename: `tiktok_${video.id}_HD.mp4`,
+                    musicUrl: musicUrl,
+                    cover: video.cover
                 };
             }
         }
     } catch (e) {
-        console.log('Method 1 failed:', e.message);
+        console.log('TikWM failed:', e.message);
     }
-    
-    // Method 2: Web scraping
+
+    // Method 2: Try MusicalDown (another reliable source)
     try {
-        const response = await fetch(url, {
+        const musicaldownUrl = 'https://musicaldown.com/api/download';
+        const formData = new URLSearchParams();
+        formData.append('url', url);
+        
+        const response = await fetch(musicaldownUrl, {
+            method: 'POST',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            }
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            body: formData
         });
-        
-        const html = await response.text();
-        const videoUrlMatch = html.match(/"playAddr":"([^"]+)"/);
-        const widthMatch = html.match(/"width":(\d+)/);
-        const heightMatch = html.match(/"height":(\d+)/);
-        
-        if (videoUrlMatch) {
-            const videoUrl = videoUrlMatch[1].replace(/\\u002F/g, '/');
-            return {
-                url: videoUrl,
-                quality: widthMatch && heightMatch ? `${widthMatch[1]}x${heightMatch[1]}` : 'HD',
-                bitrate: 'Original',
-                size: 'Variable',
-                codec: 'h264',
-                filename: `tiktok_${videoId}.mp4`
-            };
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.status === 'success' && data.data) {
+                // Get the no-watermark HD version
+                const hdVideo = data.data.video_no_watermark_hd || data.data.video_no_watermark;
+                
+                return {
+                    downloadUrl: hdVideo,
+                    quality: data.data.video_no_watermark_hd ? 'Original HD' : 'HD',
+                    size: 'Variable',
+                    bitrate: 'Original',
+                    codec: 'h264',
+                    filename: `tiktok_original_hd.mp4`
+                };
+            }
         }
     } catch (e) {
-        console.log('Method 2 failed:', e.message);
+        console.log('MusicalDown failed:', e.message);
     }
-    
-    // Method 3: Reliable API fallback
+
+    // Method 3: SnapTik as backup
     try {
-        const apiUrl = 'https://api.tiklydown.eu.org/api/download/v3';
-        const response = await fetch(apiUrl, {
+        const response = await fetch('https://api.tiklydown.eu.org/api/download/v3', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
@@ -120,42 +122,23 @@ async function getOriginalVideo(url) {
 
         if (response.ok) {
             const data = await response.json();
-            if (data.result && data.result.video) {
+            if (data.result) {
+                // Try to get HD version first
+                const videoUrl = data.result.hdVideo || data.result.video;
+                
                 return {
-                    url: data.result.video,
-                    quality: data.result.quality || 'HD',
-                    bitrate: 'Original',
+                    downloadUrl: videoUrl,
+                    quality: data.result.hdVideo ? 'HD' : 'Standard',
                     size: data.result.size || 'Unknown',
+                    bitrate: 'High',
                     codec: 'h264',
-                    filename: `tiktok_${videoId}.mp4`
+                    filename: 'tiktok_video_hd.mp4'
                 };
             }
         }
     } catch (e) {
-        console.log('Method 3 failed:', e.message);
+        console.log('TiklyDown failed:', e.message);
     }
     
-    throw new Error('All extraction methods failed');
-}
-
-function extractVideoId(url) {
-    const patterns = [
-        /tiktok\.com\/@[\w.-]+\/video\/(\d+)/,
-        /tiktok\.com\/v\/(\d+)/,
-        /vm\.tiktok\.com\/([\w]+)/,
-        /vt\.tiktok\.com\/([\w]+)/
-    ];
-    
-    for (const pattern of patterns) {
-        const match = url.match(pattern);
-        if (match) return match[1];
-    }
-    
-    return Date.now().toString();
-}
-
-function calculateSize(bitrate, duration) {
-    if (!bitrate || !duration) return 'Unknown';
-    const sizeInMB = (bitrate * duration) / 8 / 1024 / 1024;
-    return `${sizeInMB.toFixed(1)} MB`;
+    throw new Error('Unable to extract video. TikTok might have updated their system.');
 }
